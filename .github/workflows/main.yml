@@ -1,0 +1,47 @@
+name: checkmarxone-sast-gha
+
+on: [workflow_dispatch]
+
+jobs:
+  checkmarxone-sast-scan-job:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read 
+    outputs:
+      checkmarxone-sast-job-output-critical: ${{ steps.checkmarxone-sast-step.outputs.critical-count }}
+      checkmarxone-sast-job-output-very-high: ${{ steps.checkmarxone-sast-step.outputs.very-high-count }}
+      checkmarxone-sast-job-output-high: ${{ steps.checkmarxone-sast-step.outputs.high-count }}
+      checkmarxone-sast-job-output-medium: ${{ steps.checkmarxone-sast-step.outputs.medium-count }}
+      checkmarxone-sast-job-output-low: ${{ steps.checkmarxone-sast-step.outputs.low-count }}
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v3
+
+      - name: Print GITHUB_RUN_ID
+        shell: bash
+        run: |
+          echo "Ref name is $GITHUB_RUN_ID"
+          echo "Source is ${{ github.server_url }}/${{ github.repository }}"
+          echo "Subject is $GITHUB_WORKFLOW_REF|${{ github.run_id }}|${{ github.run_attempt }}|${{ github.run_number }}"
+          echo "Job is $GITHUB_JOB"
+          
+      - id: checkmarxone-sast-step
+        name: Checkmarx One SAST scan
+        uses: cloudbees-io-gha/checkmarxone-sast-publish@v1
+        with:
+          url: ${{ vars.CHECKMARXONE_URL }}
+          tenant: ${{ vars.CHECKMARXONE_TENANT }}
+          api-key: ${{ secrets.CHECKMARXONE_API_KEY }}
+          severity: critical,high
+
+      - id: print-outputs-from-checkmarxone-sast-step
+        name: Print outputs from the upstream Checkmarx One SAST Scan step
+        run: |
+          # Printing all outputs
+          echo "Outputs from upstream Checkmarx One SAST Scan step:"
+          echo "Critical count: ${{ steps.checkmarxone-sast-step.outputs.critical-count }}"
+          echo "Very high count: ${{ steps.checkmarxone-sast-step.outputs.very-high-count }}"
+          echo "High count: ${{ steps.checkmarxone-sast-step.outputs.high-count }}"
+          echo "Medium count: ${{ steps.checkmarxone-sast-step.outputs.medium-count }}"
+          echo "Low count: ${{ steps.checkmarxone-sast-step.outputs.low-count }}"
