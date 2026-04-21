@@ -1,0 +1,14 @@
+apiVersion: automation.cloudbees.io/v1alpha1
+kind: workflow
+name: checkmarxone-sast
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    steps:
+      - uses: cloudbees-io/checkout@v1
+        name: checkout
+
+      - uses: checkmarxone-sast-action
+        name: checkmarxone sast
