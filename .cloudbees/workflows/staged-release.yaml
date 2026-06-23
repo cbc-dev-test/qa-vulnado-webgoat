@@ -1,0 +1,219 @@
+apiVersion: automation.cloudbees.io/v1alpha1
+kind: workflow
+name: staged-approval-release
+on:
+  workflow_dispatch:
+metadata:
+  stages/v1alpha1:
+    - name: Release Readiness
+      jobs:
+        - create-release-ticket
+        - gather-evidence
+        - quality-gate-check
+        - update-jira-status
+        - checkout-and-sast-scan
+        - policy-check-release-readiness
+        - policy-check-container-release-readiness
+        - approval
+    - name: Quality Assurance
+      jobs:
+        - helm-deploy
+        - unify-fm
+        - playwright-e2e-tests
+        - performance-tests
+        - policy-check-qa
+    - name: Staging
+      jobs:
+        - create-release
+        - argocd-deploy
+        - enable-beta-features
+        - smoke-tests
+        - rollback-check
+        - policy-check-staging
+    - name: Production
+      jobs:
+        - servicenow-approval
+        - blue-green-deploy
+        - prod-smoke-tests
+        - gradual-feature-rollout
+        - policy-check-production
+jobs:
+  create-release-ticket:
+    steps:
+      - run: echo "Creating release ticket"
+        uses: docker://golang:1.26.3
+        shell: sh
+  gather-evidence:
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Gathering release evidence"
+  quality-gate-check:
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Running quality gate check"
+  update-jira-status:
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Updating JIRA status"
+  checkout-and-sast-scan:
+    needs: update-jira-status
+    outputs:
+      policy-subject: ${{ steps.trivy-scan.outputs.policy-subject }}
+    steps:
+      - with:
+          provider: github
+          repository: https://github.com/Dev-Org-Hari/webrtc-go
+          ref: main
+          path: webrtc-repo
+        uses: cloudbees-io/checkout@v1
+        name: Chekout Component 2
+      - with:
+          snyk-token: b805f82c-36ef-4f7d-aee5-16bfaa718f75
+          org-id: cloudbees-compliance-partner-development
+          workspace-dir: gosec-count
+        uses: cloudbees-io/snyk-sast-plugin@v1
+        name: Run Snyk Sast Scan
+        id: snyk-sast-scan
+      - name: Print Policy Subject
+        uses: docker://alpine:3.20
+        run: |
+          echo "Policy Subject: ${{ steps.snyk-sast-scan.outputs.policy-subject }}"
+      - with:
+          url: ${{ vars.JFROG_URL }}
+          username: ${{ vars.JFROG_ACTIONS_USERNAME }}
+          password: ${{ secrets.JFROG_ACTIONS_PASSWORD }}
+          file-path: /cloudbees/workspace/golang-alpine.tar
+          artifactory-path: test-generic-repo/jfrogtest/golang-alpine.tar
+        uses: cloudbees-io/jfrog-artifactory-download-file@v1
+        name: jfrog-actions-workflow-download
+      - with:
+          binary-tar-path: /cloudbees/workspace/golang-alpine.tar
+        uses: cloudbees-io/trivy-plugin@v1
+        name: trivy-scan
+        id: trivy-scan
+      - name: Print Trivy Policy Subject
+        uses: docker://alpine:3.20
+        run: |
+          echo "Policy Subject: ${{ steps.trivy-scan.outputs.policy-subject }}"
+  policy-check-release-readiness:
+    needs: checkout-and-sast-scan
+    uses: cloudbees-io/policy-utils/.cloudbees/workflows/action.yaml@main
+    with:
+      policy-id: a236aef0-6444-42d1-b4cf-aaa01affa4d0
+      input-data: ${{ needs.checkout-and-sast-scan.outputs.policy-subject }}
+    secrets: inherit
+  policy-check-container-release-readiness:
+    needs: checkout-and-sast-scan
+    uses: cloudbees-io/policy-utils/.cloudbees/workflows/action.yaml@main
+    with:
+      policy-id: a236aef0-6444-42d1-b4cf-aaa01affa4d0
+      input-data: ${{ needs.checkout-and-sast-scan.outputs.policy-subject }}
+    secrets: inherit
+  approval:
+    needs:
+      - create-release-ticket
+      - gather-evidence
+      - quality-gate-check
+      - update-jira-status
+      - checkout-and-sast-scan
+      - policy-check-release-readiness
+      - policy-check-container-release-readiness
+    timeout-minutes: 4320
+    delegates: cloudbees-io/manual-approval/custom-job.yml@v1
+    with:
+      instructions: Approve release readiness to proceed to QA.
+      disallowLaunchByUser: false
+      approvers: release-managers
+      notifyAllEligibleUsers: false
+  helm-deploy:
+    needs: approval
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Deploying via Helm to QA environment"
+  unify-fm:
+    needs: approval
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Running Unify FM checks"
+  playwright-e2e-tests:
+    needs: approval
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Running Playwright E2E tests"
+  performance-tests:
+    needs: approval
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Running performance tests"
+  policy-check-qa:
+    needs:
+      - helm-deploy
+      - unify-fm
+      - playwright-e2e-tests
+      - performance-tests
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Evaluating policies - High CVE Notification (NOTIFY)"
+  create-release:
+    needs: policy-check-qa
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Creating release for staging"
+  argocd-deploy:
+    needs: create-release
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Deploying to staging via ArgoCD"
+  enable-beta-features:
+    needs: create-release
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Enabling beta features in staging"
+  smoke-tests:
+    needs:
+      - argocd-deploy
+      - enable-beta-features
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Running smoke tests on staging"
+  rollback-check:
+    needs:
+      - argocd-deploy
+      - enable-beta-features
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Running rollback check on staging"
+  policy-check-staging:
+    needs:
+      - smoke-tests
+      - rollback-check
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Evaluating policies - Production Readiness (PAUSE & NOTIFY)"
+  servicenow-approval:
+    needs: policy-check-staging
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "ServiceNow approval submitted"
+  blue-green-deploy:
+    needs: servicenow-approval
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Running blue-green deployment to production"
+  prod-smoke-tests:
+    needs: blue-green-deploy
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Running production smoke tests"
+  gradual-feature-rollout:
+    needs: blue-green-deploy
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Gradual feature rollout in production"
+  policy-check-production:
+    needs:
+      - prod-smoke-tests
+      - gradual-feature-rollout
+    steps:
+      - uses: docker://alpine:3.20
+        run: echo "Evaluating policies - Production deployment complete"
