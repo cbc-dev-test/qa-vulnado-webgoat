@@ -8,9 +8,6 @@ metadata:
     - name: Release Readiness
       jobs:
         - create-release-ticket
-        - gather-evidence
-        - quality-gate-check
-        - update-jira-status
         - checkout-and-sast-scan
         - policy-check-release-readiness
         - policy-check-container-release-readiness
@@ -18,10 +15,6 @@ metadata:
     - name: Quality Assurance
       jobs:
         - helm-deploy
-        - unify-fm
-        - playwright-e2e-tests
-        - performance-tests
-        - policy-check-qa
     - name: Staging
       jobs:
         - create-release
@@ -43,20 +36,7 @@ jobs:
       - run: echo "Creating release ticket"
         uses: docker://golang:1.26.3
         shell: sh
-  gather-evidence:
-    steps:
-      - uses: docker://alpine:3.20
-        run: echo "Gathering release evidence"
-  quality-gate-check:
-    steps:
-      - uses: docker://alpine:3.20
-        run: echo "Running quality gate check"
-  update-jira-status:
-    steps:
-      - uses: docker://alpine:3.20
-        run: echo "Updating JIRA status"
   checkout-and-sast-scan:
-    needs: update-jira-status
     outputs:
       policy-subject: ${{ steps.trivy-scan.outputs.policy-subject }}
     steps:
@@ -112,9 +92,6 @@ jobs:
   approval:
     needs:
       - create-release-ticket
-      - gather-evidence
-      - quality-gate-check
-      - update-jira-status
       - checkout-and-sast-scan
       - policy-check-release-readiness
       - policy-check-container-release-readiness
@@ -130,32 +107,10 @@ jobs:
     steps:
       - uses: docker://alpine:3.20
         run: echo "Deploying via Helm to QA environment"
-  unify-fm:
-    needs: approval
-    steps:
-      - uses: docker://alpine:3.20
-        run: echo "Running Unify FM checks"
-  playwright-e2e-tests:
-    needs: approval
-    steps:
-      - uses: docker://alpine:3.20
-        run: echo "Running Playwright E2E tests"
-  performance-tests:
-    needs: approval
-    steps:
-      - uses: docker://alpine:3.20
-        run: echo "Running performance tests"
-  policy-check-qa:
+  create-release:
     needs:
       - helm-deploy
-      - unify-fm
-      - playwright-e2e-tests
-      - performance-tests
-    steps:
-      - uses: docker://alpine:3.20
-        run: echo "Evaluating policies - High CVE Notification (NOTIFY)"
-  create-release:
-    needs: policy-check-qa
+      - approval
     steps:
       - uses: docker://alpine:3.20
         run: echo "Creating release for staging"
